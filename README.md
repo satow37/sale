@@ -47,7 +47,8 @@ Settings → Pages → Source: **Deploy from a branch** / Branch: `main` / フ�
 1. Actions → 「商品候補を探す」→ Run workflow → キーワードに「電気ケトル」→ 実行。結果画面に候補一覧が出れば楽天APIはOK。
 2. 気に入った商品の itemCode を `products.yaml` に追記(GitHub上で鉛筆アイコンから編集できます)。
 3. Actions → 「価格チェックと投稿」→ Run workflow(テストモードにチェックのまま)→ 実行。
-4. `stock.yaml` に悩み投稿を書いて、Actions → 「悩み投稿」→ Run workflow(テストモードのまま)→ 実行。ログに投稿文が出ればOK。
+4. Actions → 「Threadsトークン確認」→ Run workflow。「✓ トークンは有効です」「✓ 投稿の権限もあります」が出ればOK(投稿はしません)。
+5. `stock.yaml` に悩み投稿を書いて、Actions → 「悩み投稿」→ Run workflow(テストモードのまま)→ 実行。ログに投稿文が出ればOK。
 
 ### 4. 本番開始
 Settings → Secrets and variables → Actions → **Variables** タブ → New repository variable
