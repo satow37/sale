@@ -1,15 +1,18 @@
-"""価格を取得 → 買い時を判定 → Threadsに投稿 → セール情報ページを更新"""
+"""価格を取得 → 買い時を判定 → 投稿候補をIssueで確認依頼 → セール情報ページを更新
+
+実際の投稿は、Issueに OK とコメントしたときに approve.py が行う
+"""
 import os
 import statistics
 import sys
-import time
 from datetime import datetime
 
 import yaml
 
-from common import (ROOT, fetch_item, load_json, now_jst, save_json,
-                    threads_post)
+import github_api
 from build_page import build_page
+from common import ROOT, fetch_item, load_json, now_jst, save_json
+from posts import build_posts, preview
 
 DRY_RUN = os.environ.get("DRY_RUN", "true").lower() != "false"
 HISTORY_KEEP_DAYS = 180
@@ -43,77 +46,46 @@ def evaluate(entries, price, threshold):
     return {"ref": ref, "drop": drop, "reason": reason}
 
 
-def make_post(item, info, price, url):
-    """1投稿版(pain/solution が未記入の商品用)"""
-    name = item["name"][:40]
-    lines = [
-        "【PR】",
-        f"{name} が値下がり中",
-        f"💰 {price:,}円({info['reason']})",
-    ]
-    if item.get("comment"):
-        lines.append(f"✔ {item['comment']}")
-    lines += ["", "▼楽天で見る", url, "", "※価格は投稿時点。変動することがあります"]
-    text = "\n".join(lines)
-    return text[:500]
-
-
-def is_two_step(item):
-    return bool((item.get("pain") or "").strip() and (item.get("solution") or "").strip())
-
-
-def make_main_post(item):
-    """2段構成の本投稿: 悩みの場面と問いかけだけ(リンクなし)"""
-    return item["pain"].strip()[:500]
-
-
-def make_reply_post(item, info, price, url):
-    """2段構成の返信: 解決できる理由 + セール価格 + 【PR】リンク"""
-    name = item["name"][:40]
-    tail = "\n".join([
-        "",
-        "",
-        f"{name}",
-        f"💰 {price:,}円({info['reason']})",
-        "",
-        "▼楽天で見る",
-        url,
-        "",
-        "※価格は投稿時点。変動することがあります",
-    ])
-    head = "【PR】\n"
-    # 500文字を超えるときは solution 側を削って、価格とリンクは必ず残す
-    room = 500 - len(head) - len(tail)
-    solution = item["solution"].strip()
-    if len(solution) > room:
-        solution = solution[: room - 1] + "…"
-    return head + solution + tail
-
-
-def publish(item, info, price, url):
-    """投稿して、最初の投稿IDを返す。テストモードなら None"""
-    if is_two_step(item):
-        posts = [make_main_post(item), make_reply_post(item, info, price, url)]
-    else:
-        posts = [make_post(item, info, price, url)]
+def proposal_body(item, info, price, url, posts, expire_days):
+    parts = []
     for i, text in enumerate(posts):
-        label = "本投稿" if i == 0 else "返信"
-        print(f"----- {label} -----\n{text}")
-    if DRY_RUN:
-        print("(テストモードのため投稿していません)")
-        return None
+        label = "本投稿" if i == 0 else f"返信{i}"
+        parts.append(f"**{label}**({len(text)}文字)\n\n```text\n{text}\n```")
+    return "\n".join([
+        f"<!-- sale-proposal code={item['code']} -->",
+        f"## {item['name']} が買い時です",
+        "",
+        f"- いまの価格: **{price:,}円**({info['reason']})",
+        f"- 商品ページ: {url}",
+        "",
+        "### 投稿する内容",
+        "",
+        "\n\n".join(parts),
+        "",
+        "### どうしますか?",
+        "",
+        "- 投稿する → このIssueに **OK** とコメント",
+        f"- 見送る → **NG** とコメント(同じ商品は{item.get('cooldown', 7)}日間提案しません)",
+        f"- {expire_days}日たっても返事がなければ自動で見送ります",
+        "",
+        "OKのときは価格をもう一度確認し、値上がりしていたら投稿しません。",
+    ])
 
-    first_id = threads_post(posts[0])
-    if len(posts) > 1:
-        time.sleep(10)  # 公開直後は返信先として見つからないことがあるので少し待つ
-        for attempt in range(2):
-            try:
-                threads_post(posts[1], reply_to_id=first_id)
-                break
-            except Exception as e:
-                print(f"⚠ 返信の投稿失敗({attempt + 1}回目): {e}")
-                time.sleep(20)
-    return first_id
+
+def expire_proposals(pending, now, expire_days):
+    """返事がないまま期限が過ぎた投稿候補を閉じる"""
+    for code, p in list(pending.items()):
+        if (now - parse_t(p["t"])).days < expire_days:
+            continue
+        print(f"期限切れのため見送り: {code}(Issue #{p['issue']})")
+        if DRY_RUN:
+            continue
+        try:
+            github_api.comment(p["issue"], f"{expire_days}日たったので見送りました。")
+            github_api.close_issue(p["issue"])
+        except Exception as e:
+            print(f"⚠ Issueを閉じられませんでした: {e}")
+        del pending[code]
 
 
 def main():
@@ -122,6 +94,7 @@ def main():
     items = conf.get("items") or []
     history = load_json("history.json", {})
     posted = load_json("posted.json", {})
+    pending = load_json("pending.json", {})
     now = now_jst()
     stamp = now.isoformat(timespec="minutes")
 
@@ -130,6 +103,8 @@ def main():
 
     min_days = settings.get("min_history_days", 5)
     cooldown = settings.get("repost_cooldown_days", 7)
+    expire_days = settings.get("proposal_expire_days", 2)
+    expire_proposals(pending, now, expire_days)
     deals, rows = [], []
 
     for item in items:
@@ -171,6 +146,8 @@ def main():
 
         if not (info and info["reason"] and available):
             continue
+        if code in pending:  # 確認待ちの候補がある
+            continue
         last = posted.get(code)
         if last:
             elapsed = (now - parse_t(last["t"])).days
@@ -180,19 +157,28 @@ def main():
 
     deals.sort(key=lambda d: d[0], reverse=True)
     for drop, item, info, price, url in deals[: settings.get("max_posts_per_run", 2)]:
-        try:
-            post_id = publish(item, info, price, url)
-        except Exception as e:
-            print(f"⚠ 投稿失敗: {e}")
+        posts = build_posts(item, info, price, url)
+        print(f"===== 投稿候補: {item['name']} =====")
+        preview(posts)
+        if DRY_RUN:
+            print("(テストモードのため確認依頼は出していません)")
             continue
-        if post_id:
-            # 本投稿が出ていれば記録する(返信だけ失敗しても同じ悩みを連投しないため)
-            posted[item["code"]] = {"t": stamp, "p": price, "id": post_id}
+        try:
+            number = github_api.create_issue(
+                f"投稿候補: {item['name']} {price:,}円",
+                proposal_body({**item, "cooldown": cooldown}, info, price, url, posts, expire_days))
+        except Exception as e:
+            print(f"⚠ 確認依頼を出せませんでした: {e}")
+            continue
+        pending[item["code"]] = {"t": stamp, "p": price, "issue": number,
+                                 "ref": info["ref"], "reason": info["reason"]}
+        print(f"確認依頼を出しました: Issue #{number}")
 
     save_json("history.json", history)
     save_json("posted.json", posted)
+    save_json("pending.json", pending)
     build_page(rows, settings, now)
-    print(f"完了: {len(rows)}商品をチェック、買い時 {len(deals)}件")
+    print(f"完了: {len(rows)}商品をチェック、買い時 {len(deals)}件、確認待ち {len(pending)}件")
 
 
 if __name__ == "__main__":

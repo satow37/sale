@@ -6,7 +6,8 @@ from datetime import datetime
 
 import yaml
 
-from common import ROOT, load_json, now_jst, save_json, threads_post
+from common import ROOT, load_json, now_jst, save_json
+from posts import post_chain, preview, split_text
 
 DRY_RUN = os.environ.get("DRY_RUN", "true").lower() != "false"
 
@@ -17,7 +18,8 @@ def post_key(text):
 
 def posted_sale_today(now):
     posted = load_json("posted.json", {})
-    return any(datetime.fromisoformat(v["t"]).date() == now.date() for v in posted.values())
+    return any(datetime.fromisoformat(v["t"]).date() == now.date()
+               for v in posted.values() if not v.get("skipped"))
 
 
 def main():
@@ -36,13 +38,14 @@ def main():
         print("⚠ 未投稿のストックがありません。stock.yaml に書き足してください。")
         return 0
 
-    text = todo[0]["text"].strip()[:500]
-    print("----- 悩み投稿 -----\n" + text)
+    text = todo[0]["text"].strip()
+    chain = split_text(text)  # 500文字を超える分は返信につなげる
+    preview(chain)
     if DRY_RUN:
         print("(テストモードのため投稿していません)")
         return 0
 
-    post_id = threads_post(text)
+    post_id = post_chain(chain)
     done[post_key(text)] = {"t": now.isoformat(timespec="minutes"), "id": post_id}
     save_json("stock_posted.json", done)
     if len(todo) <= 3:

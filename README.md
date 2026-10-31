@@ -6,21 +6,34 @@
 ## しくみ
 
 ```
-products.yaml(自分で選んだ商品)
+products.yaml(自分で選んだ商品と投稿文)
    ↓ 1日3回(8時・12時・20時)
 楽天APIで価格取得 → data/history.json に記録
    ↓
 30日間のふだんの価格より15%以上安い / 90日最安値 → 「買い時」
    ↓
-Threadsに投稿(1回最大2件・同じ商品は7日間再投稿しない)
-  pain と solution を書いた商品 → 本投稿(悩み・リンクなし)+ 返信(解決策・価格・【PR】リンク)
-  書いていない商品        → 1投稿(【PR】・価格・リンク)
+GitHub の Issue に「投稿候補」が届く(投稿文の下書きつき)
+   ↓ 自分で確認
+OK とコメント → 価格をもう一度確認して Threads に投稿
+NG とコメント → 見送り(7日間は同じ商品を提案しない)
+2日返事がない → 自動で見送り
+   ↓
 docs/index.html を更新(GitHub Pagesで公開)
 
 stock.yaml(書き溜めた悩み投稿)
    ↓ 毎日21時
 その日にセール投稿がなければ、未投稿のものを上から1本投稿(リンクなし)
 ```
+
+投稿は500文字を超えると、空行の切れ目で自動的に分けて、返信としてつなげます。
+
+## 投稿候補の確認のしかた
+
+- 候補が届くと GitHub から通知が来ます(GitHub のスマホアプリを入れておくと便利です)
+- Issue を開いて投稿文を読み、**OK** か **NG** とコメントするだけです
+- リポジトリの持ち主(satow37)のコメントにだけ反応します
+- 投稿文を直したいときは、NG にしてから `products.yaml` を直してください。次に値下がりしたとき、直した文で候補が届きます
+- Issue は公開されています。投稿前の下書きも誰でも見られる状態です
 
 ## 初回セットアップ
 
@@ -46,7 +59,7 @@ Settings → Pages → Source: **Deploy from a branch** / Branch: `main` / フ�
 ### 3. 動作テスト
 1. Actions → 「商品候補を探す」→ Run workflow → キーワードに「電気ケトル」→ 実行。結果画面に候補一覧が出れば楽天APIはOK。
 2. 気に入った商品の itemCode を `products.yaml` に追記(GitHub上で鉛筆アイコンから編集できます)。
-3. Actions → 「価格チェックと投稿」→ Run workflow(テストモードにチェックのまま)→ 実行。
+3. Actions → 「価格チェックと投稿候補」→ Run workflow(テストモードにチェックのまま)→ 実行。
 4. Actions → 「Threadsトークン確認」→ Run workflow。「✓ トークンは有効です」「✓ 投稿の権限もあります」が出ればOK(投稿はしません)。
 5. `stock.yaml` に悩み投稿を書いて、Actions → 「悩み投稿」→ Run workflow(テストモードのまま)→ 実行。ログに投稿文が出ればOK。
 
@@ -54,7 +67,7 @@ Settings → Pages → Source: **Deploy from a branch** / Branch: `main` / フ�
 Settings → Secrets and variables → Actions → **Variables** タブ → New repository variable
 - 名前 `LIVE_MODE` / 値 `true`
 
-これで定期実行が実際に投稿するようになります。止めたいときは `false` に。
+これで定期実行が、投稿候補の Issue を出し、悩み投稿を実際に流すようになります。止めたいときは `false` に。
 
 ## 注意
 - 値下がり判定には5日ほど価格の記録が必要です。始めてすぐは投稿されません。

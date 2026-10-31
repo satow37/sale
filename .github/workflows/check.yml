@@ -1,4 +1,4 @@
-name: 価格チェックと投稿
+name: 価格チェックと投稿候補
 
 on:
   schedule:
@@ -9,12 +9,13 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "テストモード(投稿しない)"
+        description: "テストモード(確認依頼を出さない)"
         type: boolean
         default: true
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: check
@@ -34,7 +35,7 @@ jobs:
           RAKUTEN_APP_ID: ${{ secrets.RAKUTEN_APP_ID }}
           RAKUTEN_ACCESS_KEY: ${{ secrets.RAKUTEN_ACCESS_KEY }}
           RAKUTEN_AFFILIATE_ID: ${{ secrets.RAKUTEN_AFFILIATE_ID }}
-          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 手動実行は入力値、定期実行はリポジトリ変数 LIVE_MODE が true のときだけ本番投稿
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.dry_run) || (vars.LIVE_MODE == 'true' && 'false' || 'true') }}
         run: python scripts/check_prices.py
