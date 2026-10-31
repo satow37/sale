@@ -1,0 +1,33 @@
+name: 商品候補を探す
+
+on:
+  workflow_dispatch:
+    inputs:
+      keyword:
+        description: "検索キーワード(例: 電気ケトル)"
+        required: true
+      sort:
+        description: "並び順"
+        type: choice
+        options: [レビュー数順, 安い順, 標準]
+        default: レビュー数順
+      min_price:
+        description: "最低価格(アクセサリー類を除外したいとき。空欄可)"
+        required: false
+
+jobs:
+  find:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - env:
+          RAKUTEN_APP_ID: ${{ secrets.RAKUTEN_APP_ID }}
+          RAKUTEN_ACCESS_KEY: ${{ secrets.RAKUTEN_ACCESS_KEY }}
+          KEYWORD: ${{ inputs.keyword }}
+          SORT: ${{ inputs.sort }}
+          MIN_PRICE: ${{ inputs.min_price }}
+        run: python scripts/find_items.py

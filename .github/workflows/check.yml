@@ -1,0 +1,47 @@
+name: 価格チェックと投稿
+
+on:
+  schedule:
+    # 日本時間 8:07 / 12:07 / 20:07(UTCで指定)
+    - cron: "7 23 * * *"
+    - cron: "7 3 * * *"
+    - cron: "7 11 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "テストモード(投稿しない)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: 価格チェック
+        env:
+          RAKUTEN_APP_ID: ${{ secrets.RAKUTEN_APP_ID }}
+          RAKUTEN_ACCESS_KEY: ${{ secrets.RAKUTEN_ACCESS_KEY }}
+          RAKUTEN_AFFILIATE_ID: ${{ secrets.RAKUTEN_AFFILIATE_ID }}
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          # 手動実行は入力値、定期実行はリポジトリ変数 LIVE_MODE が true のときだけ本番投稿
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.dry_run) || (vars.LIVE_MODE == 'true' && 'false' || 'true') }}
+        run: python scripts/check_prices.py
+      - name: 記録とページを保存
+        run: |
+          git config user.name "sale-bot"
+          git config user.email "sale-bot@users.noreply.github.com"
+          git add data docs
+          git diff --cached --quiet || git commit -m "価格更新 $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')"
+          git push
