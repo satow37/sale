@@ -29,3 +29,16 @@ jobs:
           fi
           TOTAL=$(echo "$LIMIT" | jq -r '.data[0].config.quota_total // "?"')
           echo "✓ 投稿の権限もあります(直近24時間の投稿 ${USED} / ${TOTAL} 件)"
+
+          # トークンに付いている権限の一覧(取れない場合は表示だけして終わる)
+          DBG=$(curl -sS -G "$BASE/debug_token" --data-urlencode "input_token=${TOKEN}" --data-urlencode "access_token=${TOKEN}")
+          SCOPES=$(echo "$DBG" | jq -r '.data.scopes // empty | join(", ")')
+          if [ -z "$SCOPES" ]; then
+            echo "権限の一覧は取得できませんでした: $(echo "$DBG" | jq -c '.error.message // .')"
+          else
+            echo "権限: ${SCOPES}"
+            case ",${SCOPES// /}," in
+              *,threads_manage_replies,*) echo "✓ 返信の権限(threads_manage_replies)もあります" ;;
+              *) echo "✗ 返信の権限(threads_manage_replies)がありません。2段構成の返信が失敗します" ;;
+            esac
+          fi
