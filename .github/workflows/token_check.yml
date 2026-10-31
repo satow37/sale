@@ -1,0 +1,31 @@
+name: Threadsトークン確認
+
+# 投稿はせずに、トークンが有効か・投稿の権限があるかだけを確かめる
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: アカウント情報と投稿枠を取得
+        env:
+          TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+        run: |
+          BASE="https://graph.threads.net/v1.0"
+          ME=$(curl -sS -G "$BASE/me" --data-urlencode "fields=id,username" --data-urlencode "access_token=${TOKEN}")
+          NAME=$(echo "$ME" | jq -r '.username // empty')
+          if [ -z "$NAME" ]; then
+            echo "トークンが使えません: $(echo "$ME" | jq -c '.error // .')"
+            exit 1
+          fi
+          echo "✓ トークンは有効です: @${NAME}"
+
+          LIMIT=$(curl -sS -G "$BASE/me/threads_publishing_limit" --data-urlencode "fields=quota_usage,config" --data-urlencode "access_token=${TOKEN}")
+          USED=$(echo "$LIMIT" | jq -r '.data[0].quota_usage // empty')
+          if [ -z "$USED" ]; then
+            echo "投稿枠を取得できません(投稿の権限 threads_content_publish がない可能性): $(echo "$LIMIT" | jq -c '.error // .')"
+            exit 1
+          fi
+          TOTAL=$(echo "$LIMIT" | jq -r '.data[0].config.quota_total // "?"')
+          echo "✓ 投稿の権限もあります(直近24時間の投稿 ${USED} / ${TOTAL} 件)"
